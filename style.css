@@ -126,6 +126,10 @@ video {
   display: block;
 }
 
+#remoteAudio {
+  display: none;
+}
+
 .field {
   display: block;
   margin-top: 10px;

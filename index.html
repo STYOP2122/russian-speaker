@@ -41,7 +41,9 @@
             </div>
             <div class="videoBlock">
               <div class="label">Собеседник</div>
-              <video id="remoteVideo" autoplay playsinline></video>
+              <video id="remoteVideo" autoplay playsinline muted></video>
+              <!-- Remote audio is routed to <audio> for more reliable autoplay than <video> with audio tracks -->
+              <audio id="remoteAudio" autoplay playsinline></audio>
             </div>
           </div>
           <p class="hint">

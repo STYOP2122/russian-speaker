@@ -13,11 +13,14 @@ const els = {
   envHint: document.getElementById("envHint"),
   localVideo: document.getElementById("localVideo"),
   remoteVideo: document.getElementById("remoteVideo"),
+  remoteAudio: document.getElementById("remoteAudio"),
 };
 
 let pc = null;
 let localStream = null;
 let remoteStream = new MediaStream();
+let remoteVideoStream = new MediaStream();
+let remoteAudioStream = new MediaStream();
 let side = null; // "ru" | "am"
 let ws = null;
 let clientId = null;
@@ -195,11 +198,22 @@ async function tryPlayVideo(el) {
   }
 }
 
+async function tryPlayAudio(el) {
+  if (!el) return;
+  try {
+    await el.play();
+  } catch {
+    // ignore
+  }
+}
+
 async function ensureMediaPlayback() {
-  // Remote audio comes through the <video> element unless we split audio out.
-  if (els.remoteVideo) els.remoteVideo.muted = false;
+  // Video can stay muted for autoplay policies; audio is played via <audio>.
+  if (els.remoteVideo) els.remoteVideo.muted = true;
+  if (els.remoteAudio) els.remoteAudio.muted = false;
   await tryPlayVideo(els.localVideo);
   await tryPlayVideo(els.remoteVideo);
+  await tryPlayAudio(els.remoteAudio);
 }
 
 function enableControls() {
@@ -225,19 +239,43 @@ function createPeerConnection() {
   });
 
   remoteStream = new MediaStream();
-  els.remoteVideo.srcObject = remoteStream;
+  remoteVideoStream = new MediaStream();
+  remoteAudioStream = new MediaStream();
+  els.remoteVideo.srcObject = remoteVideoStream;
+  if (els.remoteAudio) els.remoteAudio.srcObject = remoteAudioStream;
 
   pc.ontrack = (ev) => {
     const incoming = ev.streams?.[0];
     if (!incoming) return;
+    let addedVideo = false;
+    let addedAudio = false;
     for (const track of incoming.getTracks()) {
       // Avoid duplicate tracks if the browser fires multiple events.
       const exists = remoteStream.getTracks().some((t) => t.id === track.id);
       if (!exists) remoteStream.addTrack(track);
+
+      if (track.kind === "video") {
+        const existsV = remoteVideoStream.getTracks().some((t) => t.id === track.id);
+        if (!existsV) {
+          remoteVideoStream.addTrack(track);
+          addedVideo = true;
+        }
+      } else if (track.kind === "audio") {
+        const existsA = remoteAudioStream.getTracks().some((t) => t.id === track.id);
+        if (!existsA) {
+          remoteAudioStream.addTrack(track);
+          addedAudio = true;
+        }
+      }
     }
-    els.remoteVideo.srcObject = remoteStream;
+    els.remoteVideo.srcObject = remoteVideoStream;
+    if (els.remoteAudio) els.remoteAudio.srcObject = remoteAudioStream;
     void ensureMediaPlayback();
-    setStatus(`Трек от собеседника: ${incoming.getVideoTracks().length ? "видео" : "без видео"} + ${incoming.getAudioTracks().length ? "аудио" : "без аудио"}`);
+    setStatus(
+      `Трек от собеседника: ${addedVideo || remoteVideoStream.getVideoTracks().length ? "видео" : "без видео"} + ${
+        addedAudio || remoteAudioStream.getAudioTracks().length ? "аудио" : "без аудио"
+      }`
+    );
   };
 
   pc.onconnectionstatechange = () => {
@@ -374,7 +412,10 @@ function stopMedia() {
 
   els.localVideo.srcObject = null;
   remoteStream = new MediaStream();
-  els.remoteVideo.srcObject = remoteStream;
+  remoteVideoStream = new MediaStream();
+  remoteAudioStream = new MediaStream();
+  els.remoteVideo.srcObject = remoteVideoStream;
+  if (els.remoteAudio) els.remoteAudio.srcObject = remoteAudioStream;
 
   pendingIceCandidates = [];
   setStatus("Остановлено");
@@ -462,7 +503,6 @@ function init() {
     return;
   }
   createPeerConnection();
-  els.remoteVideo.srcObject = remoteStream;
   wireUi();
   enableControls();
   setSide(null);
