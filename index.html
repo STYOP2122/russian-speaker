@@ -35,15 +35,15 @@
           </div>
 
           <div class="videos" id="videoStage">
-            <div class="videoBlock">
-              <div class="label">Вы</div>
-              <video id="localVideo" autoplay playsinline muted></video>
-            </div>
-            <div class="videoBlock">
+            <div class="videoBlock video-remote">
               <div class="label">Собеседник</div>
               <video id="remoteVideo" autoplay playsinline muted></video>
               <!-- Remote audio is routed to <audio> for more reliable autoplay than <video> with audio tracks -->
               <audio id="remoteAudio" autoplay playsinline></audio>
+            </div>
+            <div class="videoBlock video-local">
+              <div class="label">Вы</div>
+              <video id="localVideo" autoplay playsinline muted></video>
             </div>
           </div>
           <p class="hint">
