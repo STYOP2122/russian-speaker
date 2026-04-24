@@ -8,6 +8,6 @@ bindings = [
 ]
 
 [[migrations]]
-tag = "v1"
-new_classes = ["Room"]
+tag = "v2"
+new_sqlite_classes = ["Room"]
 
