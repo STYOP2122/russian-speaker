@@ -11,7 +11,7 @@
       <header class="header">
         <h1>WebRTC звонок 1:1</h1>
         <p class="sub">
-          Только GitHub Pages: выберите сторону 🇷🇺/🇦🇲 и обменяйтесь короткими кодами.
+          Авто‑звонок без пересылки кодов (через Cloudflare сигналинг).
         </p>
       </header>
 
@@ -58,41 +58,25 @@
             <span id="sideBadge" class="badge">Сторона не выбрана</span>
           </div>
 
+          <div class="row">
+            <button id="btnConnect" disabled>Подключиться</button>
+            <button id="btnDisconnect" class="ghost" disabled>Отключиться</button>
+          </div>
+
           <p class="hint">
-            🇷🇺 создаёт первый код (Offer). 🇦🇲 вставляет его и получает ответный код (Answer).
-            Потом 🇷🇺 вставляет Answer — и вы на связи.
+            После подключения, когда обе стороны онлайн, звонок начнётся автоматически.
           </p>
-
-          <label class="field">
-            <span>Ваш код (отправьте собеседнику)</span>
-            <textarea id="outSdp" rows="9" readonly></textarea>
-            <div class="row">
-              <button id="btnCopyOut" class="ghost" disabled>Копировать</button>
-              <span id="status" class="status">Готово</span>
-            </div>
-          </label>
-
-          <label class="field">
-            <span>Код от собеседника (вставьте сюда)</span>
-            <textarea id="inSdp" rows="9" placeholder="Вставьте RS1:... (или JSON)"></textarea>
-            <div class="row">
-              <button id="btnApplyIn" disabled>Вставил(а) → продолжить</button>
-              <button id="btnClearIn" class="ghost" disabled>Очистить</button>
-            </div>
-          </label>
 
           <details class="faq">
             <summary>Как пользоваться</summary>
             <ol>
               <li>Оба нажимают “Включить микрофон (и камеру)”.</li>
               <li>Оба выбирают свою сторону: 🇷🇺 или 🇦🇲.</li>
-              <li>🇷🇺 получает “Ваш код” → отправляет 🇦🇲.</li>
-              <li>🇦🇲 вставляет код → жмёт “Вставил(а) → продолжить” → получает “Ваш код” → отправляет 🇷🇺.</li>
-              <li>🇷🇺 вставляет ответный код → жмёт “Вставил(а) → продолжить”.</li>
+              <li>Оба нажимают “Подключиться”.</li>
+              <li>Ждёте: когда обе стороны подключены, звонок стартует сам.</li>
             </ol>
             <p class="hint">
-              Важно: коды могут быть длинными — это нормально. В некоторых сетях
-              прямое соединение может не установиться без TURN-сервера.
+              В некоторых сетях прямое соединение может не установиться без TURN‑сервера.
             </p>
           </details>
         </div>

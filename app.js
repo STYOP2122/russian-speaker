@@ -7,11 +7,8 @@ const els = {
   btnSideRu: document.getElementById("btnSideRu"),
   btnSideAm: document.getElementById("btnSideAm"),
   sideBadge: document.getElementById("sideBadge"),
-  outSdp: document.getElementById("outSdp"),
-  btnCopyOut: document.getElementById("btnCopyOut"),
-  inSdp: document.getElementById("inSdp"),
-  btnApplyIn: document.getElementById("btnApplyIn"),
-  btnClearIn: document.getElementById("btnClearIn"),
+  btnConnect: document.getElementById("btnConnect"),
+  btnDisconnect: document.getElementById("btnDisconnect"),
   status: document.getElementById("status"),
   localVideo: document.getElementById("localVideo"),
   remoteVideo: document.getElementById("remoteVideo"),
@@ -21,6 +18,28 @@ let pc = null;
 let localStream = null;
 let remoteStream = new MediaStream();
 let side = null; // "ru" | "am"
+let ws = null;
+let clientId = null;
+
+function getSignalWsUrl() {
+  // After deploying the Worker, open the site as:
+  // https://.../?signal=wss://YOUR_WORKER_DOMAIN/ws
+  const u = new URL(location.href);
+  return u.searchParams.get("signal");
+}
+
+function disconnectAuto() {
+  if (ws) {
+    try {
+      ws.close();
+    } catch {
+      // ignore
+    }
+  }
+  ws = null;
+  clientId = null;
+  enableControls();
+}
 
 function setSide(next) {
   side = next;
@@ -33,11 +52,62 @@ function setSide(next) {
     els.sideBadge.textContent = "🇦🇲 Армения (отвечает на первый код)";
     els.btnSideAm?.classList.remove("ghost");
     els.btnSideRu?.classList.add("ghost");
-    els.outSdp.value = "";
   } else {
     els.sideBadge.textContent = "Сторона не выбрана";
   }
   enableControls();
+}
+
+function connectAuto() {
+  const base = getSignalWsUrl();
+  if (!base) throw new Error("Нужен параметр ?signal=wss://.../ws (URL Worker)");
+  if (!side) throw new Error("Сначала выберите 🇷🇺 или 🇦🇲");
+  if (!localStream) throw new Error("Сначала включите микрофон/камеру");
+
+  const url = new URL(base);
+  url.searchParams.set("room", "ru-am");
+  url.searchParams.set("side", side);
+
+  disconnectAuto();
+  clientId = crypto.randomUUID();
+  ws = new WebSocket(url.toString());
+
+  ws.onopen = () => {
+    setStatus("Подключено. Жду вторую сторону…");
+    ws.send(JSON.stringify({ t: "join", from: clientId, side }));
+    enableControls();
+  };
+
+  ws.onclose = () => {
+    setStatus("Отключено");
+    disconnectAuto();
+  };
+
+  ws.onerror = () => setStatus("Ошибка сигналинга");
+
+  ws.onmessage = async (ev) => {
+    try {
+      const msg = JSON.parse(ev.data);
+      if (msg.t === "ready") {
+        if (msg.initiator === clientId) {
+          setStatus("Обе стороны онлайн. Стартую звонок…");
+          await startAutoCallAsInitiator();
+        } else {
+          setStatus("Обе стороны онлайн. Жду звонок…");
+        }
+        return;
+      }
+      if (msg.t === "sdp" && msg.desc) {
+        await onRemoteSdp(msg.desc);
+        return;
+      }
+      if (msg.t === "ice" && msg.candidate) {
+        await createPeerConnection().addIceCandidate(msg.candidate);
+      }
+    } catch (e) {
+      setStatus(`Ошибка: ${e?.message ?? e}`);
+    }
+  };
 }
 
 function describeGetUserMediaError(e) {
@@ -61,15 +131,14 @@ function setStatus(text) {
 function enableControls() {
   const hasMedia = Boolean(localStream);
   const hasPc = Boolean(pc);
+  const connected = Boolean(ws && ws.readyState === WebSocket.OPEN);
 
   els.btnStop.disabled = !hasMedia;
   els.btnMute.disabled = !hasMedia;
   els.btnCam.disabled = !hasMedia || localStream?.getVideoTracks().length === 0;
 
-  els.btnApplyIn.disabled = !hasPc || !side;
-  els.btnClearIn.disabled = !hasPc;
-
-  els.btnCopyOut.disabled = !els.outSdp.value.trim();
+  els.btnConnect.disabled = !hasPc || !side || !hasMedia || connected;
+  els.btnDisconnect.disabled = !connected;
 }
 
 function createPeerConnection() {
@@ -96,46 +165,17 @@ function createPeerConnection() {
     setStatus(`ICE: ${pc.iceGatheringState}`);
   };
 
-  // Manual signaling mode: we embed ICE candidates into SDP by waiting for ICE gathering.
+  pc.onicecandidate = (ev) => {
+    if (!ev.candidate) return;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ t: "ice", from: clientId, candidate: ev.candidate }));
+    }
+  };
 
   return pc;
 }
 
-async function autoMakeOfferIfReady() {
-  if (side !== "ru") return;
-  if (!pc) createPeerConnection();
-  if (!localStream) return;
-  if (pc.localDescription) return;
-  await createOffer();
-}
-
-async function continueFlowWithIncomingCode() {
-  const peer = createPeerConnection();
-  const desc = parseSdpString(els.inSdp.value);
-  setStatus(`Применяю ${desc.type}…`);
-  await peer.setRemoteDescription(desc);
-  els.inSdp.value = "";
-
-  if (desc.type === "offer") {
-    if (side !== "am") {
-      setStatus("Это Offer. Его должна вставлять сторона 🇦🇲.");
-      return;
-    }
-    await createAnswer();
-    return;
-  }
-
-  if (desc.type === "answer") {
-    if (side !== "ru") {
-      setStatus("Это Answer. Его должна вставлять сторона 🇷🇺.");
-      return;
-    }
-    setStatus("Answer применён. Если сеть позволяет — вы на связи.");
-    return;
-  }
-
-  setStatus(`Неожиданный тип: ${desc.type}`);
-}
+// Manual flow removed: auto signaling via WebSocket.
 
 async function waitIceGatheringComplete(peer) {
   if (peer.iceGatheringState === "complete") return;
@@ -150,84 +190,24 @@ async function waitIceGatheringComplete(peer) {
   });
 }
 
-function getSdpString(desc) {
-  // Prefer short share code when compression is available.
-  const json = JSON.stringify(desc);
-  try {
-    const code = encodeShortCode(json);
-    if (code) return code;
-  } catch {
-    // ignore, fall back to JSON
-  }
-  return json;
+async function startAutoCallAsInitiator() {
+  const peer = createPeerConnection();
+  setStatus("Создаю Offer (авто)…");
+  const offer = await peer.createOffer();
+  await peer.setLocalDescription(offer);
+  ws.send(JSON.stringify({ t: "sdp", from: clientId, desc: peer.localDescription }));
 }
 
-function base64UrlEncode(bytes) {
-  let bin = "";
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-  const b64 = btoa(bin);
-  return b64.replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
-}
-
-function base64UrlDecodeToBytes(b64url) {
-  let b64 = b64url.replaceAll("-", "+").replaceAll("_", "/");
-  while (b64.length % 4 !== 0) b64 += "=";
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
-function encodeShortCode(jsonString) {
-  // RS1 = Russian Speaker v1 share code.
-  const pako = window.pako;
-  if (!pako?.deflate) return null;
-  const bytes = new TextEncoder().encode(jsonString);
-  const deflated = pako.deflate(bytes);
-  return `RS1:${base64UrlEncode(deflated)}`;
-}
-
-function decodeShortCodeToJson(text) {
-  const pako = window.pako;
-  if (!pako?.inflate) throw new Error("Сжатый код не поддерживается (нет pako)");
-  const raw = text.trim();
-  if (!raw.startsWith("RS1:")) return null;
-  const payload = raw.slice(4).trim();
-  const bytes = base64UrlDecodeToBytes(payload);
-  const inflated = pako.inflate(bytes);
-  return new TextDecoder().decode(inflated);
-}
-
-function parseSdpString(text) {
-  const trimmed = text.trim();
-  if (!trimmed) throw new Error("Пустой код");
-
-  // Support short share codes.
-  const decoded = decodeShortCodeToJson(trimmed);
-  if (decoded) return parseSdpString(decoded);
-
-  // Be tolerant to copy/paste where users include extra text around JSON.
-  const firstBrace = trimmed.indexOf("{");
-  const lastBrace = trimmed.lastIndexOf("}");
-  const candidate =
-    firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace
-      ? trimmed.slice(firstBrace, lastBrace + 1)
-      : trimmed;
-
-  try {
-    const obj = JSON.parse(candidate);
-    if (!obj?.type || !obj?.sdp) {
-      throw new Error("Неверный формат (ожидается JSON с полями type и sdp)");
-    }
-    return obj;
-  } catch (e) {
-    const msg = String(e?.message ?? e);
-    if (/Unterminated string|Unexpected end of JSON|Unexpected token/.test(msg)) {
-      throw new Error(
-        "Код вставлен не полностью (JSON обрезан/повреждён). Скопируйте код целиком: от '{' до '}'."
-      );
-    }
-    throw e;
+async function onRemoteSdp(desc) {
+  const peer = createPeerConnection();
+  await peer.setRemoteDescription(desc);
+  if (desc.type === "offer") {
+    setStatus("Получил Offer → создаю Answer (авто)…");
+    const answer = await peer.createAnswer();
+    await peer.setLocalDescription(answer);
+    ws.send(JSON.stringify({ t: "sdp", from: clientId, desc: peer.localDescription }));
+  } else {
+    setStatus("Получил Answer (авто)");
   }
 }
 
@@ -276,7 +256,6 @@ function stopMedia() {
   remoteStream = new MediaStream();
   els.remoteVideo.srcObject = remoteStream;
 
-  els.outSdp.value = "";
   setStatus("Остановлено");
   enableControls();
 }
@@ -297,42 +276,7 @@ function toggleVideo() {
   els.btnCam.textContent = enabledNow ? "Cam on" : "Cam off";
 }
 
-async function createOffer() {
-  const peer = createPeerConnection();
-  setStatus("Создаю Offer…");
-  const offer = await peer.createOffer();
-  await peer.setLocalDescription(offer);
-  await waitIceGatheringComplete(peer);
-  els.outSdp.value = getSdpString(peer.localDescription);
-  setStatus("Offer готов — отправьте код собеседнику");
-  enableControls();
-}
-
-async function createAnswer() {
-  const peer = createPeerConnection();
-  if (!peer.remoteDescription) {
-    throw new Error("Сначала примените Offer от собеседника");
-  }
-  setStatus("Создаю Answer…");
-  const answer = await peer.createAnswer();
-  await peer.setLocalDescription(answer);
-  await waitIceGatheringComplete(peer);
-  els.outSdp.value = getSdpString(peer.localDescription);
-  setStatus("Answer готов — отправьте код обратно");
-  enableControls();
-}
-
-async function copyOut() {
-  const text = els.outSdp.value.trim();
-  if (!text) return;
-  await navigator.clipboard.writeText(text);
-  setStatus("Скопировано в буфер обмена");
-}
-
-function clearIn() {
-  els.inSdp.value = "";
-  enableControls();
-}
+// Legacy manual helpers removed.
 
 function wireUi() {
   els.btnStart.addEventListener("click", async () => {
@@ -350,26 +294,14 @@ function wireUi() {
   els.btnSideRu?.addEventListener("click", () => setSide("ru"));
   els.btnSideAm?.addEventListener("click", () => setSide("am"));
 
-  els.btnApplyIn.addEventListener("click", async () => {
+  els.btnConnect?.addEventListener("click", () => {
     try {
-      await continueFlowWithIncomingCode();
+      connectAuto();
     } catch (e) {
-      setStatus(`Ошибка применения: ${e?.message ?? e}`);
+      setStatus(e?.message ?? String(e));
     }
   });
-
-  els.btnCopyOut.addEventListener("click", async () => {
-    try {
-      await copyOut();
-    } catch (e) {
-      setStatus(`Не удалось скопировать: ${e?.message ?? e}`);
-    }
-  });
-
-  els.btnClearIn.addEventListener("click", () => clearIn());
-
-  els.outSdp.addEventListener("input", () => enableControls());
-  els.inSdp.addEventListener("input", () => enableControls());
+  els.btnDisconnect?.addEventListener("click", () => disconnectAuto());
 
   window.addEventListener("beforeunload", () => stopMedia());
 }
@@ -387,7 +319,8 @@ function init() {
   els.remoteVideo.srcObject = remoteStream;
   wireUi();
   enableControls();
-  setStatus("Готово. Настройте Supabase в `config.js`, затем войдите по юзернейму.");
+  setSide(null);
+  setStatus("Готово. Включите микрофон, выберите 🇷🇺/🇦🇲 и нажмите “Подключиться”.");
 }
 
 init();
