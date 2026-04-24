@@ -96,16 +96,84 @@ async function waitIceGatheringComplete(peer) {
 }
 
 function getSdpString(desc) {
-  // We stringify the RTCSessionDescriptionInit.
-  return JSON.stringify(desc);
+  // Prefer short share code when compression is available.
+  const json = JSON.stringify(desc);
+  try {
+    const code = encodeShortCode(json);
+    if (code) return code;
+  } catch {
+    // ignore, fall back to JSON
+  }
+  return json;
+}
+
+function base64UrlEncode(bytes) {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  const b64 = btoa(bin);
+  return b64.replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+}
+
+function base64UrlDecodeToBytes(b64url) {
+  let b64 = b64url.replaceAll("-", "+").replaceAll("_", "/");
+  while (b64.length % 4 !== 0) b64 += "=";
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function encodeShortCode(jsonString) {
+  // RS1 = Russian Speaker v1 share code.
+  const pako = window.pako;
+  if (!pako?.deflate) return null;
+  const bytes = new TextEncoder().encode(jsonString);
+  const deflated = pako.deflate(bytes);
+  return `RS1:${base64UrlEncode(deflated)}`;
+}
+
+function decodeShortCodeToJson(text) {
+  const pako = window.pako;
+  if (!pako?.inflate) throw new Error("Сжатый код не поддерживается (нет pako)");
+  const raw = text.trim();
+  if (!raw.startsWith("RS1:")) return null;
+  const payload = raw.slice(4).trim();
+  const bytes = base64UrlDecodeToBytes(payload);
+  const inflated = pako.inflate(bytes);
+  return new TextDecoder().decode(inflated);
 }
 
 function parseSdpString(text) {
   const trimmed = text.trim();
   if (!trimmed) throw new Error("Пустой код");
-  const obj = JSON.parse(trimmed);
-  if (!obj?.type || !obj?.sdp) throw new Error("Неверный формат (ожидается JSON с type/sdp)");
-  return obj;
+
+  // Support short share codes.
+  const decoded = decodeShortCodeToJson(trimmed);
+  if (decoded) return parseSdpString(decoded);
+
+  // Be tolerant to copy/paste where users include extra text around JSON.
+  const firstBrace = trimmed.indexOf("{");
+  const lastBrace = trimmed.lastIndexOf("}");
+  const candidate =
+    firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace
+      ? trimmed.slice(firstBrace, lastBrace + 1)
+      : trimmed;
+
+  try {
+    const obj = JSON.parse(candidate);
+    if (!obj?.type || !obj?.sdp) {
+      throw new Error("Неверный формат (ожидается JSON с полями type и sdp)");
+    }
+    return obj;
+  } catch (e) {
+    const msg = String(e?.message ?? e);
+    if (/Unterminated string|Unexpected end of JSON|Unexpected token/.test(msg)) {
+      throw new Error(
+        "Код вставлен не полностью (JSON обрезан/повреждён). Скопируйте код целиком: от '{' до '}'."
+      );
+    }
+    throw e;
+  }
 }
 
 async function startMedia() {
