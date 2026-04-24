@@ -91,6 +91,23 @@ function connectAuto() {
   ws.onmessage = async (ev) => {
     try {
       const msg = JSON.parse(ev.data);
+      if (msg.t === "denied") {
+        setStatus(
+          msg.reason === "side-taken"
+            ? "Эта сторона уже занята (🇷🇺 или 🇦🇲). Попросите собеседника отключиться или выберите другую сторону."
+            : "Подключение отклонено сервером."
+        );
+        try {
+          ws.close();
+        } catch {
+          // ignore
+        }
+        return;
+      }
+      if (msg.t === "peer-left") {
+        setStatus("Собеседник отключился");
+        return;
+      }
       if (msg.t === "ready") {
         if (msg.initiator === clientId) {
           setStatus("Обе стороны онлайн. Стартую звонок…");
@@ -362,17 +379,46 @@ function stopMedia() {
 function toggleAudio() {
   if (!localStream) return;
   const audioTracks = localStream.getAudioTracks();
-  const enabledNow = audioTracks.some((t) => t.enabled);
-  for (const t of audioTracks) t.enabled = !enabledNow;
-  els.btnMute.textContent = enabledNow ? "Unmute" : "Mute";
+  if (audioTracks.length === 0) return;
+  const enabledNow = audioTracks.every((t) => t.enabled);
+  const next = !enabledNow;
+  for (const t of audioTracks) {
+    t.enabled = next;
+    // Some browsers also respect `muted` for outgoing audio.
+    t.muted = !next;
+  }
+  els.btnMute.textContent = next ? "Mute" : "Unmute";
 }
 
-function toggleVideo() {
+async function toggleVideo() {
   if (!localStream) return;
+  const peer = createPeerConnection();
   const videoTracks = localStream.getVideoTracks();
-  const enabledNow = videoTracks.some((t) => t.enabled);
-  for (const t of videoTracks) t.enabled = !enabledNow;
-  els.btnCam.textContent = enabledNow ? "Cam on" : "Cam off";
+  const sender = peer.getSenders().find((s) => s.track && s.track.kind === "video");
+
+  if (videoTracks.length === 0) {
+    // User started audio-only; allow turning camera on later.
+    if (!els.optVideo) return;
+    els.optVideo.checked = true;
+    try {
+      const vStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
+      const vTrack = vStream.getVideoTracks()[0];
+      localStream.addTrack(vTrack);
+      if (sender) await sender.replaceTrack(vTrack);
+      else peer.addTrack(vTrack, localStream);
+      els.btnCam.textContent = "Cam off";
+      setStatus(`Камера включена (${summarizeStream(localStream)})`);
+      enableControls();
+    } catch (e) {
+      setStatus(describeGetUserMediaError(e));
+    }
+    return;
+  }
+
+  const enabledNow = videoTracks.every((t) => t.enabled);
+  const next = !enabledNow;
+  for (const t of videoTracks) t.enabled = next;
+  els.btnCam.textContent = next ? "Cam off" : "Cam on";
 }
 
 // Legacy manual helpers removed.

@@ -15,32 +15,47 @@ export default {
 export class Room {
   constructor(state) {
     this.state = state;
-    this.clients = new Map(); // clientId -> ws
+    this.clients = new Map(); // clientId -> { ws, side }
+    this.sideToClientId = new Map(); // side -> clientId
   }
 
-  async fetch() {
+  async fetch(request) {
+    const url = new URL(request.url);
+    const urlSide = String(url.searchParams.get("side") || "");
+
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
     server.accept();
 
     let myId = null;
+    let mySide = null;
 
     const broadcast = (data, except = null) => {
-      for (const [id, ws] of this.clients) {
+      for (const [id, entry] of this.clients) {
         if (except && id === except) continue;
         try {
-          ws.send(data);
+          entry.ws.send(data);
         } catch {
           // ignore
         }
       }
     };
 
+    const pickInitiator = () => {
+      // Prefer RU as offerer when both sides are present.
+      const ru = this.sideToClientId.get("ru");
+      if (ru && this.clients.has(ru)) return ru;
+      const [first] = this.clients.keys();
+      return first || null;
+    };
+
     const maybeReady = () => {
-      if (this.clients.size === 2) {
-        const [initiator] = this.clients.keys(); // first joined
-        broadcast(JSON.stringify({ t: "ready", initiator }));
+      const hasRu = this.sideToClientId.has("ru");
+      const hasAm = this.sideToClientId.has("am");
+      if (hasRu && hasAm) {
+        const initiator = pickInitiator();
+        if (initiator) broadcast(JSON.stringify({ t: "ready", initiator }));
       }
     };
 
@@ -49,8 +64,24 @@ export class Room {
         const msg = JSON.parse(ev.data);
         if (msg.t === "join") {
           myId = String(msg.from || crypto.randomUUID());
-          this.clients.set(myId, server);
-          server.send(JSON.stringify({ t: "joined", id: myId }));
+          const side = String(msg.side || urlSide || "");
+          if (side !== "ru" && side !== "am") {
+            server.send(JSON.stringify({ t: "denied", reason: "bad-side" }));
+            server.close(1008, "bad-side");
+            return;
+          }
+
+          const occupiedBy = this.sideToClientId.get(side);
+          if (occupiedBy && occupiedBy !== myId && this.clients.has(occupiedBy)) {
+            server.send(JSON.stringify({ t: "denied", reason: "side-taken", side }));
+            server.close(1008, "side-taken");
+            return;
+          }
+
+          mySide = side;
+          this.sideToClientId.set(side, myId);
+          this.clients.set(myId, { ws: server, side });
+          server.send(JSON.stringify({ t: "joined", id: myId, side }));
           maybeReady();
           return;
         }
@@ -67,7 +98,8 @@ export class Room {
     });
 
     const cleanup = () => {
-      if (myId && this.clients.get(myId) === server) this.clients.delete(myId);
+      if (myId && this.clients.get(myId)?.ws === server) this.clients.delete(myId);
+      if (mySide && this.sideToClientId.get(mySide) === myId) this.sideToClientId.delete(mySide);
       if (this.clients.size === 0) return;
       // If one left, notify the other.
       broadcast(JSON.stringify({ t: "peer-left" }));
