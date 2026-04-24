@@ -331,18 +331,23 @@ async function startMedia() {
 
   setStatus(wantVideo ? "Запрашиваю доступ к камере/микрофону…" : "Запрашиваю доступ к микрофону…");
 
-  const constraints = { audio: true, video: wantVideo };
-  try {
-    localStream = await navigator.mediaDevices.getUserMedia(constraints);
-  } catch (e) {
-    // Common case: user wants video but camera is blocked/unavailable.
-    if (wantVideo) {
-      setStatus("Камера недоступна — пробую только микрофон…");
-      localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  // Important: avoid capturing microphone audio twice (some cameras expose a mic track too).
+  // We keep a single mic audio track + a separate video-only track when camera is enabled.
+  if (wantVideo) {
+    const mic = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    try {
+      const cam = await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
+      localStream = new MediaStream();
+      for (const t of mic.getTracks()) localStream.addTrack(t);
+      for (const t of cam.getTracks()) localStream.addTrack(t);
+    } catch (e) {
+      // Camera failed: fall back to mic-only
+      localStream = mic;
       if (els.optVideo) els.optVideo.checked = false;
-    } else {
-      throw e;
+      setStatus("Камера недоступна — работаем только микрофоном…");
     }
+  } else {
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
   }
   els.localVideo.srcObject = localStream;
   void tryPlayVideo(els.localVideo);
@@ -384,8 +389,6 @@ function toggleAudio() {
   const next = !enabledNow;
   for (const t of audioTracks) {
     t.enabled = next;
-    // Some browsers also respect `muted` for outgoing audio.
-    t.muted = !next;
   }
   els.btnMute.textContent = next ? "Mute" : "Unmute";
 }
