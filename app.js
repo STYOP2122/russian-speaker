@@ -77,6 +77,7 @@ function connectAuto() {
   ws.onopen = () => {
     setStatus("Подключено. Жду вторую сторону…");
     ws.send(JSON.stringify({ t: "join", from: clientId, side }));
+    void ensureMediaPlayback();
     enableControls();
   };
 
@@ -177,6 +178,13 @@ async function tryPlayVideo(el) {
   }
 }
 
+async function ensureMediaPlayback() {
+  // Remote audio comes through the <video> element unless we split audio out.
+  if (els.remoteVideo) els.remoteVideo.muted = false;
+  await tryPlayVideo(els.localVideo);
+  await tryPlayVideo(els.remoteVideo);
+}
+
 function enableControls() {
   const hasMedia = Boolean(localStream);
   const hasPc = Boolean(pc);
@@ -211,7 +219,7 @@ function createPeerConnection() {
       if (!exists) remoteStream.addTrack(track);
     }
     els.remoteVideo.srcObject = remoteStream;
-    void tryPlayVideo(els.remoteVideo);
+    void ensureMediaPlayback();
     setStatus(`Трек от собеседника: ${incoming.getVideoTracks().length ? "видео" : "без видео"} + ${incoming.getAudioTracks().length ? "аудио" : "без аудио"}`);
   };
 
@@ -273,10 +281,7 @@ async function waitIceGatheringComplete(peer) {
 async function startAutoCallAsInitiator() {
   const peer = createPeerConnection();
   setStatus("Создаю Offer (авто)…");
-  const offer = await peer.createOffer({
-    offerToReceiveAudio: true,
-    offerToReceiveVideo: true,
-  });
+  const offer = await peer.createOffer();
   await peer.setLocalDescription(offer);
   ws.send(JSON.stringify({ t: "sdp", from: clientId, desc: peer.localDescription }));
 }
@@ -287,10 +292,7 @@ async function onRemoteSdp(desc) {
   await flushPendingIceCandidates();
   if (desc.type === "offer") {
     setStatus("Получил Offer → создаю Answer (авто)…");
-    const answer = await peer.createAnswer({
-      offerToReceiveAudio: true,
-      offerToReceiveVideo: true,
-    });
+    const answer = await peer.createAnswer();
     await peer.setLocalDescription(answer);
     ws.send(JSON.stringify({ t: "sdp", from: clientId, desc: peer.localDescription }));
   } else {
@@ -331,6 +333,7 @@ async function startMedia() {
   for (const track of localStream.getTracks()) peer.addTrack(track, localStream);
 
   setStatus(`Медиа включено (${summarizeStream(localStream)})`);
+  void ensureMediaPlayback();
   enableControls();
 }
 
