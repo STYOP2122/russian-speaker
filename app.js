@@ -127,6 +127,11 @@ function describeGetUserMediaError(e) {
 }
 
 function setStatus(text) {
+  if (!els.status) {
+    // Fallback if markup is missing/outdated.
+    console.info(text);
+    return;
+  }
   els.status.textContent = text;
 }
 
