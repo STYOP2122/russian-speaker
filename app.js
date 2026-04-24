@@ -160,6 +160,23 @@ function updateEnvHint() {
   els.envHint.textContent = parts.join(" ");
 }
 
+function summarizeStream(stream) {
+  if (!stream) return "нет";
+  const v = stream.getVideoTracks().length;
+  const a = stream.getAudioTracks().length;
+  return `видео:${v}, аудио:${a}`;
+}
+
+async function tryPlayVideo(el) {
+  if (!el) return;
+  try {
+    await el.play();
+  } catch {
+    // Autoplay policies: user gesture already happened for getUserMedia/connect,
+    // but keep this resilient across browsers.
+  }
+}
+
 function enableControls() {
   const hasMedia = Boolean(localStream);
   const hasPc = Boolean(pc);
@@ -186,7 +203,16 @@ function createPeerConnection() {
   els.remoteVideo.srcObject = remoteStream;
 
   pc.ontrack = (ev) => {
-    for (const track of ev.streams[0].getTracks()) remoteStream.addTrack(track);
+    const incoming = ev.streams?.[0];
+    if (!incoming) return;
+    for (const track of incoming.getTracks()) {
+      // Avoid duplicate tracks if the browser fires multiple events.
+      const exists = remoteStream.getTracks().some((t) => t.id === track.id);
+      if (!exists) remoteStream.addTrack(track);
+    }
+    els.remoteVideo.srcObject = remoteStream;
+    void tryPlayVideo(els.remoteVideo);
+    setStatus(`Трек от собеседника: ${incoming.getVideoTracks().length ? "видео" : "без видео"} + ${incoming.getAudioTracks().length ? "аудио" : "без аудио"}`);
   };
 
   pc.onconnectionstatechange = () => {
@@ -247,7 +273,10 @@ async function waitIceGatheringComplete(peer) {
 async function startAutoCallAsInitiator() {
   const peer = createPeerConnection();
   setStatus("Создаю Offer (авто)…");
-  const offer = await peer.createOffer();
+  const offer = await peer.createOffer({
+    offerToReceiveAudio: true,
+    offerToReceiveVideo: true,
+  });
   await peer.setLocalDescription(offer);
   ws.send(JSON.stringify({ t: "sdp", from: clientId, desc: peer.localDescription }));
 }
@@ -258,7 +287,10 @@ async function onRemoteSdp(desc) {
   await flushPendingIceCandidates();
   if (desc.type === "offer") {
     setStatus("Получил Offer → создаю Answer (авто)…");
-    const answer = await peer.createAnswer();
+    const answer = await peer.createAnswer({
+      offerToReceiveAudio: true,
+      offerToReceiveVideo: true,
+    });
     await peer.setLocalDescription(answer);
     ws.send(JSON.stringify({ t: "sdp", from: clientId, desc: peer.localDescription }));
   } else {
@@ -294,10 +326,11 @@ async function startMedia() {
     }
   }
   els.localVideo.srcObject = localStream;
+  void tryPlayVideo(els.localVideo);
 
   for (const track of localStream.getTracks()) peer.addTrack(track, localStream);
 
-  setStatus("Медиа включено");
+  setStatus(`Медиа включено (${summarizeStream(localStream)})`);
   enableControls();
 }
 
