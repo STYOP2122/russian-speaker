@@ -44,7 +44,44 @@ function disconnectAuto() {
   ws = null;
   clientId = null;
   pendingIceCandidates = [];
+  resetPeerConnection();
   enableControls();
+}
+
+function resetPeerConnection() {
+  // Reset WebRTC state between calls without tearing down local mic/camera.
+  if (pc) {
+    try {
+      pc.ontrack = null;
+      pc.onicecandidate = null;
+      pc.onconnectionstatechange = null;
+      pc.onicegatheringstatechange = null;
+      pc.close();
+    } catch {
+      // ignore
+    }
+  }
+  pc = null;
+
+  remoteStream = new MediaStream();
+  remoteVideoStream = new MediaStream();
+  remoteAudioStream = new MediaStream();
+  if (els.remoteVideo) els.remoteVideo.srcObject = remoteVideoStream;
+  if (els.remoteAudio) els.remoteAudio.srcObject = remoteAudioStream;
+
+  // Fresh PC for next connect.
+  createPeerConnection();
+  rebindLocalTracks();
+}
+
+function rebindLocalTracks() {
+  if (!localStream) return;
+  const peer = createPeerConnection();
+  const existing = new Set(peer.getSenders().map((s) => s.track).filter(Boolean).map((t) => t.id));
+  for (const track of localStream.getTracks()) {
+    if (existing.has(track.id)) continue;
+    peer.addTrack(track, localStream);
+  }
 }
 
 function setSide(next) {
@@ -86,10 +123,23 @@ function connectAuto() {
 
   ws.onclose = () => {
     setStatus("Отключено");
-    disconnectAuto();
+    // Avoid recursion: close already happened.
+    ws = null;
+    clientId = null;
+    pendingIceCandidates = [];
+    resetPeerConnection();
+    enableControls();
   };
 
-  ws.onerror = () => setStatus("Ошибка сигналинга");
+  ws.onerror = () => {
+    setStatus("Ошибка сигналинга");
+    // onerror does not always imply onclose; reset locally to allow reconnect.
+    ws = null;
+    clientId = null;
+    pendingIceCandidates = [];
+    resetPeerConnection();
+    enableControls();
+  };
 
   ws.onmessage = async (ev) => {
     try {
