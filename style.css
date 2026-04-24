@@ -188,6 +188,15 @@ textarea {
   color: #475569;
 }
 
+.badge {
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(255, 255, 255, 0.7);
+  color: #334155;
+}
+
 .faq {
   margin-top: 10px;
   color: #334155;

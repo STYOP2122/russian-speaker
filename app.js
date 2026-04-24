@@ -4,14 +4,9 @@ const els = {
   btnMute: document.getElementById("btnMute"),
   btnCam: document.getElementById("btnCam"),
   optVideo: document.getElementById("optVideo"),
-  myName: document.getElementById("myName"),
-  peerName: document.getElementById("peerName"),
-  btnGoOnline: document.getElementById("btnGoOnline"),
-  btnGoOffline: document.getElementById("btnGoOffline"),
-  btnCall: document.getElementById("btnCall"),
-  btnHangup: document.getElementById("btnHangup"),
-  btnCreateOffer: document.getElementById("btnCreateOffer"),
-  btnCreateAnswer: document.getElementById("btnCreateAnswer"),
+  btnSideRu: document.getElementById("btnSideRu"),
+  btnSideAm: document.getElementById("btnSideAm"),
+  sideBadge: document.getElementById("sideBadge"),
   outSdp: document.getElementById("outSdp"),
   btnCopyOut: document.getElementById("btnCopyOut"),
   inSdp: document.getElementById("inSdp"),
@@ -25,10 +20,25 @@ const els = {
 let pc = null;
 let localStream = null;
 let remoteStream = new MediaStream();
-let supabase = null;
-let myUser = null;
-let activePeer = null;
-let channel = null;
+let side = null; // "ru" | "am"
+
+function setSide(next) {
+  side = next;
+  if (side === "ru") {
+    els.sideBadge.textContent = "🇷🇺 Россия (создаёт первый код)";
+    els.btnSideRu?.classList.remove("ghost");
+    els.btnSideAm?.classList.add("ghost");
+    void autoMakeOfferIfReady();
+  } else if (side === "am") {
+    els.sideBadge.textContent = "🇦🇲 Армения (отвечает на первый код)";
+    els.btnSideAm?.classList.remove("ghost");
+    els.btnSideRu?.classList.add("ghost");
+    els.outSdp.value = "";
+  } else {
+    els.sideBadge.textContent = "Сторона не выбрана";
+  }
+  enableControls();
+}
 
 function describeGetUserMediaError(e) {
   const name = e?.name || "";
@@ -48,32 +58,16 @@ function setStatus(text) {
   els.status.textContent = text;
 }
 
-function getSupabaseConfig() {
-  const url = window.SUPABASE_URL;
-  const key = window.SUPABASE_ANON_KEY;
-  if (!url || !key || url.includes("PASTE_") || key.includes("PASTE_")) return null;
-  return { url, key };
-}
-
 function enableControls() {
   const hasMedia = Boolean(localStream);
   const hasPc = Boolean(pc);
-  const online = Boolean(myUser && channel);
 
   els.btnStop.disabled = !hasMedia;
   els.btnMute.disabled = !hasMedia;
   els.btnCam.disabled = !hasMedia || localStream?.getVideoTracks().length === 0;
 
-  // Allow signaling even before media is granted (so Answer can be created).
-  els.btnCreateOffer.disabled = !hasPc;
-  els.btnCreateAnswer.disabled = !hasPc;
-  els.btnApplyIn.disabled = !hasPc;
+  els.btnApplyIn.disabled = !hasPc || !side;
   els.btnClearIn.disabled = !hasPc;
-
-  els.btnGoOnline.disabled = !hasPc || online;
-  els.btnGoOffline.disabled = !online;
-  els.btnCall.disabled = !online;
-  els.btnHangup.disabled = !online;
 
   els.btnCopyOut.disabled = !els.outSdp.value.trim();
 }
@@ -102,12 +96,45 @@ function createPeerConnection() {
     setStatus(`ICE: ${pc.iceGatheringState}`);
   };
 
-  pc.onicecandidate = (ev) => {
-    if (!ev.candidate) return;
-    if (channel && activePeer) sendSignal(activePeer, { t: "ice", candidate: ev.candidate });
-  };
+  // Manual signaling mode: we embed ICE candidates into SDP by waiting for ICE gathering.
 
   return pc;
+}
+
+async function autoMakeOfferIfReady() {
+  if (side !== "ru") return;
+  if (!pc) createPeerConnection();
+  if (!localStream) return;
+  if (pc.localDescription) return;
+  await createOffer();
+}
+
+async function continueFlowWithIncomingCode() {
+  const peer = createPeerConnection();
+  const desc = parseSdpString(els.inSdp.value);
+  setStatus(`Применяю ${desc.type}…`);
+  await peer.setRemoteDescription(desc);
+  els.inSdp.value = "";
+
+  if (desc.type === "offer") {
+    if (side !== "am") {
+      setStatus("Это Offer. Его должна вставлять сторона 🇦🇲.");
+      return;
+    }
+    await createAnswer();
+    return;
+  }
+
+  if (desc.type === "answer") {
+    if (side !== "ru") {
+      setStatus("Это Answer. Его должна вставлять сторона 🇷🇺.");
+      return;
+    }
+    setStatus("Answer применён. Если сеть позволяет — вы на связи.");
+    return;
+  }
+
+  setStatus(`Неожиданный тип: ${desc.type}`);
 }
 
 async function waitIceGatheringComplete(peer) {
@@ -229,6 +256,7 @@ async function startMedia() {
 
   setStatus("Медиа включено");
   enableControls();
+  void autoMakeOfferIfReady();
 }
 
 function stopMedia() {
@@ -280,15 +308,6 @@ async function createOffer() {
   enableControls();
 }
 
-async function applyRemoteSdp() {
-  const peer = createPeerConnection();
-  const remoteDesc = parseSdpString(els.inSdp.value);
-  setStatus(`Применяю ${remoteDesc.type}…`);
-  await peer.setRemoteDescription(remoteDesc);
-  setStatus(`${remoteDesc.type} применён`);
-  enableControls();
-}
-
 async function createAnswer() {
   const peer = createPeerConnection();
   if (!peer.remoteDescription) {
@@ -300,128 +319,6 @@ async function createAnswer() {
   await waitIceGatheringComplete(peer);
   els.outSdp.value = getSdpString(peer.localDescription);
   setStatus("Answer готов — отправьте код обратно");
-  enableControls();
-}
-
-function normalizeName(name) {
-  return String(name || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]/g, "")
-    .slice(0, 24);
-}
-
-function initSupabase() {
-  const cfg = getSupabaseConfig();
-  if (!cfg) throw new Error("Не настроен Supabase. Откройте `config.js` и вставьте URL + anon key.");
-  const { createClient } = window.supabase;
-  supabase = createClient(cfg.url, cfg.key);
-}
-
-async function goOnline() {
-  initSupabase();
-  const name = normalizeName(els.myName.value);
-  if (!name) throw new Error("Введите нормальный юзернейм (латиница/цифры/_, -)");
-  myUser = name;
-
-  if (channel) {
-    await channel.unsubscribe();
-    channel = null;
-  }
-
-  channel = supabase.channel(`user:${myUser}`, {
-    config: { broadcast: { self: false } },
-  });
-
-  channel.on("broadcast", { event: "signal" }, async ({ payload }) => {
-    try {
-      await onSignal(payload);
-    } catch (e) {
-      setStatus(`Ошибка сигнала: ${e?.message ?? e}`);
-    }
-  });
-
-  const { error } = await channel.subscribe((status) => {
-    if (status === "SUBSCRIBED") setStatus(`Онлайн как @${myUser}`);
-  });
-  if (error) throw error;
-
-  enableControls();
-}
-
-async function goOffline() {
-  if (channel) {
-    await channel.unsubscribe();
-    channel = null;
-  }
-  myUser = null;
-  activePeer = null;
-  setStatus("Оффлайн");
-  enableControls();
-}
-
-function sendSignal(toUser, payload) {
-  if (!channel) throw new Error("Вы оффлайн");
-  const to = normalizeName(toUser);
-  if (!to) throw new Error("Неверный юзернейм собеседника");
-  return channel.send({
-    type: "broadcast",
-    event: "signal",
-    payload: { ...payload, from: myUser, to },
-  });
-}
-
-async function onSignal(payload) {
-  if (!payload?.from || !payload?.to) return;
-  if (payload.to !== myUser) return;
-
-  const peer = createPeerConnection();
-  activePeer = payload.from;
-
-  if (payload.t === "call") {
-    setStatus(`Входящий звонок от @${payload.from}…`);
-    return;
-  }
-
-  if (payload.t === "sdp" && payload.desc) {
-    await peer.setRemoteDescription(payload.desc);
-    if (payload.desc.type === "offer") {
-      const answer = await peer.createAnswer();
-      await peer.setLocalDescription(answer);
-      await sendSignal(payload.from, { t: "sdp", desc: peer.localDescription });
-      setStatus(`Принял Offer от @${payload.from} → отправил Answer`);
-    } else {
-      setStatus(`Получил Answer от @${payload.from}`);
-    }
-    return;
-  }
-
-  if (payload.t === "ice" && payload.candidate) {
-    await peer.addIceCandidate(payload.candidate);
-  }
-}
-
-async function callUser() {
-  if (!myUser || !channel) throw new Error("Сначала войдите (онлайн)");
-  const target = normalizeName(els.peerName.value);
-  if (!target) throw new Error("Введите юзернейм, кому звонить");
-  activePeer = target;
-
-  // Optional heads-up (not required)
-  await sendSignal(target, { t: "call" });
-
-  const peer = createPeerConnection();
-  const offer = await peer.createOffer();
-  await peer.setLocalDescription(offer);
-  await sendSignal(target, { t: "sdp", desc: peer.localDescription });
-  setStatus(`Звоню @${target}…`);
-}
-
-function hangup() {
-  stopMedia();
-  activePeer = null;
-  createPeerConnection();
-  setStatus("Сброшено");
   enableControls();
 }
 
@@ -450,53 +347,14 @@ function wireUi() {
   els.btnMute.addEventListener("click", () => toggleAudio());
   els.btnCam.addEventListener("click", () => toggleVideo());
 
-  els.btnCreateOffer.addEventListener("click", async () => {
-    try {
-      await createOffer();
-    } catch (e) {
-      setStatus(`Ошибка Offer: ${e?.message ?? e}`);
-    }
-  });
-
-  els.btnGoOnline?.addEventListener("click", async () => {
-    try {
-      await goOnline();
-    } catch (e) {
-      setStatus(e?.message ?? String(e));
-    }
-  });
-
-  els.btnGoOffline?.addEventListener("click", async () => {
-    try {
-      await goOffline();
-    } catch (e) {
-      setStatus(e?.message ?? String(e));
-    }
-  });
-
-  els.btnCall?.addEventListener("click", async () => {
-    try {
-      await callUser();
-    } catch (e) {
-      setStatus(e?.message ?? String(e));
-    }
-  });
-
-  els.btnHangup?.addEventListener("click", () => hangup());
+  els.btnSideRu?.addEventListener("click", () => setSide("ru"));
+  els.btnSideAm?.addEventListener("click", () => setSide("am"));
 
   els.btnApplyIn.addEventListener("click", async () => {
     try {
-      await applyRemoteSdp();
+      await continueFlowWithIncomingCode();
     } catch (e) {
       setStatus(`Ошибка применения: ${e?.message ?? e}`);
-    }
-  });
-
-  els.btnCreateAnswer.addEventListener("click", async () => {
-    try {
-      await createAnswer();
-    } catch (e) {
-      setStatus(`Ошибка Answer: ${e?.message ?? e}`);
     }
   });
 

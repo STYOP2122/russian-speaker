@@ -11,7 +11,7 @@
       <header class="header">
         <h1>WebRTC звонок 1:1</h1>
         <p class="sub">
-          Без сервера: обменяйтесь кодами Offer/Answer (подходит для GitHub Pages).
+          Только GitHub Pages: выберите сторону 🇷🇺/🇦🇲 и обменяйтесь короткими кодами.
         </p>
       </header>
 
@@ -50,39 +50,18 @@
         </div>
 
         <div class="card">
-          <h2>2) Соединение (по юзернейму)</h2>
+          <h2>2) Соединение</h2>
 
-          <label class="field">
-            <span>Ваш юзернейм</span>
-            <input id="myName" class="input" placeholder="например: styop" autocomplete="off" />
-          </label>
           <div class="row">
-            <button id="btnGoOnline">Войти (стать онлайн)</button>
-            <button id="btnGoOffline" class="ghost" disabled>Выйти</button>
-          </div>
-
-          <label class="field">
-            <span>Кому звонить (юзернейм)</span>
-            <input id="peerName" class="input" placeholder="например: armen" autocomplete="off" />
-          </label>
-          <div class="row">
-            <button id="btnCall" disabled>Позвонить</button>
-            <button id="btnHangup" class="ghost" disabled>Сбросить</button>
+            <button id="btnSideRu">🇷🇺 Россия</button>
+            <button id="btnSideAm" class="ghost">🇦🇲 Армения</button>
+            <span id="sideBadge" class="badge">Сторона не выбрана</span>
           </div>
 
           <p class="hint">
-            Требуется настроить Supabase (см. `config.js`). Медиа остаётся P2P, Supabase
-            используется только для “сигналинга”.
+            🇷🇺 создаёт первый код (Offer). 🇦🇲 вставляет его и получает ответный код (Answer).
+            Потом 🇷🇺 вставляет Answer — и вы на связи.
           </p>
-
-          <hr class="sep" />
-
-          <h3 class="h3">Ручной режим (запасной)</h3>
-
-          <div class="row">
-            <button id="btnCreateOffer" disabled>Создать Offer</button>
-            <button id="btnCreateAnswer" class="ghost" disabled>Создать Answer</button>
-          </div>
 
           <label class="field">
             <span>Ваш код (отправьте собеседнику)</span>
@@ -95,9 +74,9 @@
 
           <label class="field">
             <span>Код от собеседника (вставьте сюда)</span>
-            <textarea id="inSdp" rows="9" placeholder="Вставьте Offer или Answer…"></textarea>
+            <textarea id="inSdp" rows="9" placeholder="Вставьте RS1:... (или JSON)"></textarea>
             <div class="row">
-              <button id="btnApplyIn" disabled>Применить</button>
+              <button id="btnApplyIn" disabled>Вставил(а) → продолжить</button>
               <button id="btnClearIn" class="ghost" disabled>Очистить</button>
             </div>
           </label>
@@ -105,17 +84,11 @@
           <details class="faq">
             <summary>Как пользоваться</summary>
             <ol>
-              <li>Оба нажимают “Включить камеру/микрофон” (или хотя бы микрофон).</li>
-              <li>
-                Один нажимает “Создать Offer”, копирует “Ваш код” и отправляет второму.
-              </li>
-              <li>
-                Второй вставляет код в “Код от собеседника”, жмёт “Применить”, затем
-                “Создать Answer”, копирует “Ваш код” и отправляет первому.
-              </li>
-              <li>
-                Первый вставляет Answer в “Код от собеседника” и жмёт “Применить”.
-              </li>
+              <li>Оба нажимают “Включить микрофон (и камеру)”.</li>
+              <li>Оба выбирают свою сторону: 🇷🇺 или 🇦🇲.</li>
+              <li>🇷🇺 получает “Ваш код” → отправляет 🇦🇲.</li>
+              <li>🇦🇲 вставляет код → жмёт “Вставил(а) → продолжить” → получает “Ваш код” → отправляет 🇷🇺.</li>
+              <li>🇷🇺 вставляет ответный код → жмёт “Вставил(а) → продолжить”.</li>
             </ol>
             <p class="hint">
               Важно: коды могут быть длинными — это нормально. В некоторых сетях
@@ -127,8 +100,6 @@
     </main>
 
     <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-    <script src="./config.js"></script>
     <script type="module" src="./app.js"></script>
   </body>
 </html>
