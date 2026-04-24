@@ -10,6 +10,7 @@ const els = {
   btnConnect: document.getElementById("btnConnect"),
   btnDisconnect: document.getElementById("btnDisconnect"),
   status: document.getElementById("status"),
+  envHint: document.getElementById("envHint"),
   localVideo: document.getElementById("localVideo"),
   remoteVideo: document.getElementById("remoteVideo"),
 };
@@ -20,21 +21,7 @@ let remoteStream = new MediaStream();
 let side = null; // "ru" | "am"
 let ws = null;
 let clientId = null;
-
-window.addEventListener("error", (ev) => {
-  try {
-    setStatus(`Ошибка JS: ${ev?.message ?? ev}`);
-  } catch {
-    // ignore
-  }
-});
-window.addEventListener("unhandledrejection", (ev) => {
-  try {
-    setStatus(`Ошибка Promise: ${ev?.reason?.message ?? ev?.reason ?? ev}`);
-  } catch {
-    // ignore
-  }
-});
+let pendingIceCandidates = [];
 
 function getSignalWsUrl() {
   // After deploying the Worker, open the site as:
@@ -53,6 +40,7 @@ function disconnectAuto() {
   }
   ws = null;
   clientId = null;
+  pendingIceCandidates = [];
   enableControls();
 }
 
@@ -116,7 +104,7 @@ function connectAuto() {
         return;
       }
       if (msg.t === "ice" && msg.candidate) {
-        await createPeerConnection().addIceCandidate(msg.candidate);
+        await addRemoteIceCandidate(msg.candidate);
       }
     } catch (e) {
       setStatus(`Ошибка: ${e?.message ?? e}`);
@@ -140,6 +128,31 @@ function describeGetUserMediaError(e) {
 
 function setStatus(text) {
   els.status.textContent = text;
+}
+
+window.addEventListener("error", (ev) => {
+  try {
+    setStatus(`Ошибка JS: ${ev?.message ?? ev}`);
+  } catch {
+    // ignore
+  }
+});
+window.addEventListener("unhandledrejection", (ev) => {
+  try {
+    setStatus(`Ошибка Promise: ${ev?.reason?.message ?? ev?.reason ?? ev}`);
+  } catch {
+    // ignore
+  }
+});
+
+function updateEnvHint() {
+  if (!els.envHint) return;
+  const secure = Boolean(window.isSecureContext);
+  const hasGUM = Boolean(navigator.mediaDevices?.getUserMedia);
+  const parts = [];
+  parts.push(secure ? "Контекст: HTTPS (нормально для WebRTC)." : "Контекст: НЕ secure (часто getUserMedia не работает). Откройте сайт по https://…");
+  parts.push(hasGUM ? "getUserMedia: доступен." : "getUserMedia: недоступен в этом браузере/режиме.");
+  els.envHint.textContent = parts.join(" ");
 }
 
 function enableControls() {
@@ -189,6 +202,28 @@ function createPeerConnection() {
   return pc;
 }
 
+async function flushPendingIceCandidates() {
+  const peer = createPeerConnection();
+  if (!peer.remoteDescription) return;
+  while (pendingIceCandidates.length) {
+    const c = pendingIceCandidates.shift();
+    try {
+      await peer.addIceCandidate(c);
+    } catch {
+      // ignore bad candidates
+    }
+  }
+}
+
+async function addRemoteIceCandidate(candidate) {
+  const peer = createPeerConnection();
+  if (!peer.remoteDescription) {
+    pendingIceCandidates.push(candidate);
+    return;
+  }
+  await peer.addIceCandidate(candidate);
+}
+
 // Manual flow removed: auto signaling via WebSocket.
 
 async function waitIceGatheringComplete(peer) {
@@ -215,6 +250,7 @@ async function startAutoCallAsInitiator() {
 async function onRemoteSdp(desc) {
   const peer = createPeerConnection();
   await peer.setRemoteDescription(desc);
+  await flushPendingIceCandidates();
   if (desc.type === "offer") {
     setStatus("Получил Offer → создаю Answer (авто)…");
     const answer = await peer.createAnswer();
@@ -228,6 +264,14 @@ async function onRemoteSdp(desc) {
 async function startMedia() {
   const wantVideo = Boolean(els.optVideo?.checked);
   const peer = createPeerConnection();
+
+  updateEnvHint();
+  if (!window.isSecureContext) {
+    throw new Error("Страница открыта не по HTTPS (или внутри WebView). Откройте GitHub Pages по https://… в обычном браузере.");
+  }
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error("В этом браузере нет navigator.mediaDevices.getUserMedia (часто это встроенный браузер Telegram/Instagram). Откройте ссылку в Chrome/Safari.");
+  }
 
   setStatus(wantVideo ? "Запрашиваю доступ к камере/микрофону…" : "Запрашиваю доступ к микрофону…");
 
@@ -269,6 +313,7 @@ function stopMedia() {
   remoteStream = new MediaStream();
   els.remoteVideo.srcObject = remoteStream;
 
+  pendingIceCandidates = [];
   setStatus("Остановлено");
   enableControls();
 }
@@ -294,6 +339,7 @@ function toggleVideo() {
 function wireUi() {
   els.btnStart.addEventListener("click", async () => {
     try {
+      setStatus("Нажата кнопка старта медиа…");
       await startMedia();
     } catch (e) {
       setStatus(describeGetUserMediaError(e));
@@ -320,12 +366,9 @@ function wireUi() {
 }
 
 function init() {
+  updateEnvHint();
   if (!("RTCPeerConnection" in window)) {
     setStatus("Этот браузер не поддерживает WebRTC");
-    return;
-  }
-  if (!navigator.mediaDevices?.getUserMedia) {
-    setStatus("В этом браузере недоступен доступ к микрофону/камере (getUserMedia)");
     return;
   }
   createPeerConnection();
