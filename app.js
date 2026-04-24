@@ -4,9 +4,12 @@ const els = {
   btnMute: document.getElementById("btnMute"),
   btnCam: document.getElementById("btnCam"),
   optVideo: document.getElementById("optVideo"),
-  btnNewRoom: document.getElementById("btnNewRoom"),
-  btnJoinRoom: document.getElementById("btnJoinRoom"),
-  roomCode: document.getElementById("roomCode"),
+  myName: document.getElementById("myName"),
+  peerName: document.getElementById("peerName"),
+  btnGoOnline: document.getElementById("btnGoOnline"),
+  btnGoOffline: document.getElementById("btnGoOffline"),
+  btnCall: document.getElementById("btnCall"),
+  btnHangup: document.getElementById("btnHangup"),
   btnCreateOffer: document.getElementById("btnCreateOffer"),
   btnCreateAnswer: document.getElementById("btnCreateAnswer"),
   outSdp: document.getElementById("outSdp"),
@@ -22,9 +25,10 @@ const els = {
 let pc = null;
 let localStream = null;
 let remoteStream = new MediaStream();
-let ws = null;
-let currentRoom = null;
-let clientId = null;
+let supabase = null;
+let myUser = null;
+let activePeer = null;
+let channel = null;
 
 function describeGetUserMediaError(e) {
   const name = e?.name || "";
@@ -44,18 +48,17 @@ function setStatus(text) {
   els.status.textContent = text;
 }
 
-function getSignalingUrl() {
-  // Set SIGNALING in URL like ?signal=wss://your-worker.example/ws
-  // or fill in default once you deploy the Worker.
-  const u = new URL(location.href);
-  const fromQuery = u.searchParams.get("signal");
-  return fromQuery || null;
+function getSupabaseConfig() {
+  const url = window.SUPABASE_URL;
+  const key = window.SUPABASE_ANON_KEY;
+  if (!url || !key || url.includes("PASTE_") || key.includes("PASTE_")) return null;
+  return { url, key };
 }
 
 function enableControls() {
   const hasMedia = Boolean(localStream);
   const hasPc = Boolean(pc);
-  const hasWs = Boolean(ws && ws.readyState === WebSocket.OPEN);
+  const online = Boolean(myUser && channel);
 
   els.btnStop.disabled = !hasMedia;
   els.btnMute.disabled = !hasMedia;
@@ -67,16 +70,12 @@ function enableControls() {
   els.btnApplyIn.disabled = !hasPc;
   els.btnClearIn.disabled = !hasPc;
 
-  els.btnNewRoom.disabled = !hasPc;
-  els.btnJoinRoom.disabled = !hasPc;
-  if (els.roomCode) els.roomCode.disabled = !hasPc;
+  els.btnGoOnline.disabled = !hasPc || online;
+  els.btnGoOffline.disabled = !online;
+  els.btnCall.disabled = !online;
+  els.btnHangup.disabled = !online;
 
   els.btnCopyOut.disabled = !els.outSdp.value.trim();
-
-  // In auto mode, creating offer/answer is driven by WS events.
-  if (hasWs) {
-    // Keep manual buttons available as fallback, but not required.
-  }
 }
 
 function createPeerConnection() {
@@ -105,16 +104,7 @@ function createPeerConnection() {
 
   pc.onicecandidate = (ev) => {
     if (!ev.candidate) return;
-    if (ws && ws.readyState === WebSocket.OPEN && currentRoom) {
-      ws.send(
-        JSON.stringify({
-          t: "ice",
-          room: currentRoom,
-          from: clientId,
-          candidate: ev.candidate,
-        })
-      );
-    }
+    if (channel && activePeer) sendSignal(activePeer, { t: "ice", candidate: ev.candidate });
   };
 
   return pc;
@@ -313,96 +303,126 @@ async function createAnswer() {
   enableControls();
 }
 
-function genRoomCode() {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let out = "";
-  crypto.getRandomValues(new Uint8Array(6)).forEach((b) => {
-    out += alphabet[b % alphabet.length];
-  });
-  return out;
+function normalizeName(name) {
+  return String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "")
+    .slice(0, 24);
 }
 
-function connectWs(room) {
-  const url = getSignalingUrl();
-  if (!url) {
-    throw new Error(
-      "Авто-режим не настроен: нет адреса сигналинга. После деплоя Worker добавьте ?signal=wss://.../ws"
-    );
+function initSupabase() {
+  const cfg = getSupabaseConfig();
+  if (!cfg) throw new Error("Не настроен Supabase. Откройте `config.js` и вставьте URL + anon key.");
+  const { createClient } = window.supabase;
+  supabase = createClient(cfg.url, cfg.key);
+}
+
+async function goOnline() {
+  initSupabase();
+  const name = normalizeName(els.myName.value);
+  if (!name) throw new Error("Введите нормальный юзернейм (латиница/цифры/_, -)");
+  myUser = name;
+
+  if (channel) {
+    await channel.unsubscribe();
+    channel = null;
   }
-  if (ws) ws.close();
-  const wsUrl = new URL(url);
-  wsUrl.searchParams.set("room", room);
-  ws = new WebSocket(wsUrl.toString());
-  currentRoom = room;
-  clientId = crypto.randomUUID();
 
-  ws.onopen = () => {
-    setStatus(`Сигналинг подключён. Комната: ${currentRoom}`);
-    ws.send(JSON.stringify({ t: "join", room: currentRoom, from: clientId }));
-    enableControls();
-  };
+  channel = supabase.channel(`user:${myUser}`, {
+    config: { broadcast: { self: false } },
+  });
 
-  ws.onclose = () => {
-    setStatus("Сигналинг отключён");
-    enableControls();
-  };
-
-  ws.onerror = () => {
-    setStatus("Ошибка сигналинга");
-  };
-
-  ws.onmessage = async (ev) => {
+  channel.on("broadcast", { event: "signal" }, async ({ payload }) => {
     try {
-      const msg = JSON.parse(ev.data);
-      if (msg.t === "peer-joined") {
-        // If we created the room, initiate offer.
-        if (msg.initiator === clientId) {
-          const peer = createPeerConnection();
-          const offer = await peer.createOffer();
-          await peer.setLocalDescription(offer);
-          ws.send(
-            JSON.stringify({
-              t: "sdp",
-              room: currentRoom,
-              from: clientId,
-              desc: peer.localDescription,
-            })
-          );
-          setStatus("Отправил Offer (авто)");
-        }
-        return;
-      }
-
-      if (msg.t === "sdp" && msg.desc) {
-        const peer = createPeerConnection();
-        await peer.setRemoteDescription(msg.desc);
-        if (msg.desc.type === "offer") {
-          const answer = await peer.createAnswer();
-          await peer.setLocalDescription(answer);
-          ws.send(
-            JSON.stringify({
-              t: "sdp",
-              room: currentRoom,
-              from: clientId,
-              desc: peer.localDescription,
-            })
-          );
-          setStatus("Получил Offer → отправил Answer (авто)");
-        } else {
-          setStatus("Получил Answer (авто)");
-        }
-        return;
-      }
-
-      if (msg.t === "ice" && msg.candidate) {
-        const peer = createPeerConnection();
-        await peer.addIceCandidate(msg.candidate);
-        return;
-      }
+      await onSignal(payload);
     } catch (e) {
-      setStatus(`Ошибка сообщения: ${e?.message ?? e}`);
+      setStatus(`Ошибка сигнала: ${e?.message ?? e}`);
     }
-  };
+  });
+
+  const { error } = await channel.subscribe((status) => {
+    if (status === "SUBSCRIBED") setStatus(`Онлайн как @${myUser}`);
+  });
+  if (error) throw error;
+
+  enableControls();
+}
+
+async function goOffline() {
+  if (channel) {
+    await channel.unsubscribe();
+    channel = null;
+  }
+  myUser = null;
+  activePeer = null;
+  setStatus("Оффлайн");
+  enableControls();
+}
+
+function sendSignal(toUser, payload) {
+  if (!channel) throw new Error("Вы оффлайн");
+  const to = normalizeName(toUser);
+  if (!to) throw new Error("Неверный юзернейм собеседника");
+  return channel.send({
+    type: "broadcast",
+    event: "signal",
+    payload: { ...payload, from: myUser, to },
+  });
+}
+
+async function onSignal(payload) {
+  if (!payload?.from || !payload?.to) return;
+  if (payload.to !== myUser) return;
+
+  const peer = createPeerConnection();
+  activePeer = payload.from;
+
+  if (payload.t === "call") {
+    setStatus(`Входящий звонок от @${payload.from}…`);
+    return;
+  }
+
+  if (payload.t === "sdp" && payload.desc) {
+    await peer.setRemoteDescription(payload.desc);
+    if (payload.desc.type === "offer") {
+      const answer = await peer.createAnswer();
+      await peer.setLocalDescription(answer);
+      await sendSignal(payload.from, { t: "sdp", desc: peer.localDescription });
+      setStatus(`Принял Offer от @${payload.from} → отправил Answer`);
+    } else {
+      setStatus(`Получил Answer от @${payload.from}`);
+    }
+    return;
+  }
+
+  if (payload.t === "ice" && payload.candidate) {
+    await peer.addIceCandidate(payload.candidate);
+  }
+}
+
+async function callUser() {
+  if (!myUser || !channel) throw new Error("Сначала войдите (онлайн)");
+  const target = normalizeName(els.peerName.value);
+  if (!target) throw new Error("Введите юзернейм, кому звонить");
+  activePeer = target;
+
+  // Optional heads-up (not required)
+  await sendSignal(target, { t: "call" });
+
+  const peer = createPeerConnection();
+  const offer = await peer.createOffer();
+  await peer.setLocalDescription(offer);
+  await sendSignal(target, { t: "sdp", desc: peer.localDescription });
+  setStatus(`Звоню @${target}…`);
+}
+
+function hangup() {
+  stopMedia();
+  activePeer = null;
+  createPeerConnection();
+  setStatus("Сброшено");
+  enableControls();
 }
 
 async function copyOut() {
@@ -438,25 +458,31 @@ function wireUi() {
     }
   });
 
-  els.btnNewRoom?.addEventListener("click", () => {
+  els.btnGoOnline?.addEventListener("click", async () => {
     try {
-      const code = genRoomCode();
-      els.roomCode.value = code;
-      connectWs(code);
+      await goOnline();
     } catch (e) {
       setStatus(e?.message ?? String(e));
     }
   });
 
-  els.btnJoinRoom?.addEventListener("click", () => {
+  els.btnGoOffline?.addEventListener("click", async () => {
     try {
-      const code = (els.roomCode.value || "").trim().toUpperCase();
-      if (!code) throw new Error("Введите код комнаты");
-      connectWs(code);
+      await goOffline();
     } catch (e) {
       setStatus(e?.message ?? String(e));
     }
   });
+
+  els.btnCall?.addEventListener("click", async () => {
+    try {
+      await callUser();
+    } catch (e) {
+      setStatus(e?.message ?? String(e));
+    }
+  });
+
+  els.btnHangup?.addEventListener("click", () => hangup());
 
   els.btnApplyIn.addEventListener("click", async () => {
     try {
@@ -503,12 +529,7 @@ function init() {
   els.remoteVideo.srcObject = remoteStream;
   wireUi();
   enableControls();
-  const url = getSignalingUrl();
-  setStatus(
-    url
-      ? "Готово. Создайте комнату или подключитесь по коду."
-      : "Готово. Авто-режим появится после деплоя сигналинга (Worker). Пока можно вручную/RS1."
-  );
+  setStatus("Готово. Настройте Supabase в `config.js`, затем войдите по юзернейму.");
 }
 
 init();

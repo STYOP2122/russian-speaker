@@ -50,21 +50,30 @@
         </div>
 
         <div class="card">
-          <h2>2) Соединение (авто)</h2>
+          <h2>2) Соединение (по юзернейму)</h2>
 
+          <label class="field">
+            <span>Ваш юзернейм</span>
+            <input id="myName" class="input" placeholder="например: styop" autocomplete="off" />
+          </label>
           <div class="row">
-            <button id="btnNewRoom">Создать комнату</button>
-            <button id="btnJoinRoom" class="ghost">Подключиться</button>
+            <button id="btnGoOnline">Войти (стать онлайн)</button>
+            <button id="btnGoOffline" class="ghost" disabled>Выйти</button>
           </div>
 
           <label class="field">
-            <span>Код комнаты</span>
-            <input id="roomCode" class="input" placeholder="например: 7K2D9A" />
-            <p class="hint">
-              Один создаёт комнату и отправляет код. Второй вводит код и нажимает
-              “Подключиться”.
-            </p>
+            <span>Кому звонить (юзернейм)</span>
+            <input id="peerName" class="input" placeholder="например: armen" autocomplete="off" />
           </label>
+          <div class="row">
+            <button id="btnCall" disabled>Позвонить</button>
+            <button id="btnHangup" class="ghost" disabled>Сбросить</button>
+          </div>
+
+          <p class="hint">
+            Требуется настроить Supabase (см. `config.js`). Медиа остаётся P2P, Supabase
+            используется только для “сигналинга”.
+          </p>
 
           <hr class="sep" />
 
@@ -118,6 +127,8 @@
     </main>
 
     <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+    <script src="./config.js"></script>
     <script type="module" src="./app.js"></script>
   </body>
 </html>
