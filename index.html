@@ -17,21 +17,23 @@
       </header>
 
       <section class="grid">
-        <div class="card">
+        <div class="card card-media">
           <h2>1) Медиа</h2>
-          <div class="row">
-            <label class="check">
-              <input id="optVideo" type="checkbox" checked />
-              <span>Включать камеру</span>
-            </label>
-          </div>
-          <div class="row">
-            <button id="btnStart">Включить микрофон (и камеру)</button>
-            <button id="btnStop" class="ghost" disabled>Остановить</button>
-          </div>
-          <div class="row">
-            <button id="btnMute" class="ghost" disabled>Mute</button>
-            <button id="btnCam" class="ghost" disabled>Cam off</button>
+          <div class="mediaToolbar">
+            <div class="row">
+              <label class="check">
+                <input id="optVideo" type="checkbox" checked />
+                <span>Включать камеру</span>
+              </label>
+            </div>
+            <div class="row">
+              <button id="btnStart">Включить микрофон (и камеру)</button>
+              <button id="btnStop" class="ghost" disabled>Остановить</button>
+            </div>
+            <div class="row">
+              <button id="btnMute" class="ghost" disabled>Mute</button>
+              <button id="btnCam" class="ghost" disabled>Cam off</button>
+            </div>
           </div>
 
           <div class="videos" id="videoStage">

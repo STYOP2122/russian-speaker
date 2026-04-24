@@ -238,6 +238,54 @@ function summarizeStream(stream) {
   return `видео:${v}, аудио:${a}`;
 }
 
+/** Front camera hints on phones; wide desktop keeps plain `true`. */
+function pickVideoConstraints() {
+  try {
+    const narrow = window.matchMedia?.("(max-width: 720px)")?.matches;
+    if (narrow) {
+      return {
+        facingMode: { ideal: "user" },
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      };
+    }
+  } catch {
+    // ignore
+  }
+  return true;
+}
+
+async function getCameraStream() {
+  const constraints = pickVideoConstraints();
+  try {
+    return await navigator.mediaDevices.getUserMedia({ audio: false, video: constraints });
+  } catch (e) {
+    const name = e?.name || "";
+    if (
+      constraints !== true &&
+      (name === "OverconstrainedError" || name === "ConstraintNotSatisfiedError")
+    ) {
+      return await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
+    }
+    throw e;
+  }
+}
+
+async function sendRenegotiationOffer() {
+  const peer = createPeerConnection();
+  if (!ws || ws.readyState !== WebSocket.OPEN || !clientId) return;
+  if (!peer.remoteDescription) return;
+  if (peer.signalingState !== "stable") return;
+  try {
+    setStatus("Обновляю параметры звонка (видео)…");
+    const offer = await peer.createOffer();
+    await peer.setLocalDescription(offer);
+    ws.send(JSON.stringify({ t: "sdp", from: clientId, desc: peer.localDescription }));
+  } catch (e) {
+    setStatus(`Не удалось обновить звонок: ${e?.message ?? e}`);
+  }
+}
+
 async function tryPlayVideo(el) {
   if (!el) return;
   try {
@@ -295,29 +343,29 @@ function createPeerConnection() {
   if (els.remoteAudio) els.remoteAudio.srcObject = remoteAudioStream;
 
   pc.ontrack = (ev) => {
-    const incoming = ev.streams?.[0];
-    if (!incoming) return;
+    // Mobile Safari / some WebViews may leave `ev.streams` empty; `ev.track` is always set.
+    const track = ev.track;
+    if (!track) return;
+
+    const exists = remoteStream.getTracks().some((t) => t.id === track.id);
+    if (!exists) remoteStream.addTrack(track);
+
     let addedVideo = false;
     let addedAudio = false;
-    for (const track of incoming.getTracks()) {
-      // Avoid duplicate tracks if the browser fires multiple events.
-      const exists = remoteStream.getTracks().some((t) => t.id === track.id);
-      if (!exists) remoteStream.addTrack(track);
-
-      if (track.kind === "video") {
-        const existsV = remoteVideoStream.getTracks().some((t) => t.id === track.id);
-        if (!existsV) {
-          remoteVideoStream.addTrack(track);
-          addedVideo = true;
-        }
-      } else if (track.kind === "audio") {
-        const existsA = remoteAudioStream.getTracks().some((t) => t.id === track.id);
-        if (!existsA) {
-          remoteAudioStream.addTrack(track);
-          addedAudio = true;
-        }
+    if (track.kind === "video") {
+      const existsV = remoteVideoStream.getTracks().some((t) => t.id === track.id);
+      if (!existsV) {
+        remoteVideoStream.addTrack(track);
+        addedVideo = true;
+      }
+    } else if (track.kind === "audio") {
+      const existsA = remoteAudioStream.getTracks().some((t) => t.id === track.id);
+      if (!existsA) {
+        remoteAudioStream.addTrack(track);
+        addedAudio = true;
       }
     }
+
     els.remoteVideo.srcObject = remoteVideoStream;
     if (els.remoteAudio) els.remoteAudio.srcObject = remoteAudioStream;
     void ensureMediaPlayback();
@@ -424,7 +472,7 @@ async function startMedia() {
   if (wantVideo) {
     const mic = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     try {
-      const cam = await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
+      const cam = await getCameraStream();
       localStream = new MediaStream();
       for (const t of mic.getTracks()) localStream.addTrack(t);
       for (const t of cam.getTracks()) localStream.addTrack(t);
@@ -495,7 +543,7 @@ async function toggleVideo() {
     if (!els.optVideo) return;
     els.optVideo.checked = true;
     try {
-      const vStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
+      const vStream = await getCameraStream();
       const vTrack = vStream.getVideoTracks()[0];
       localStream.addTrack(vTrack);
       if (sender) await sender.replaceTrack(vTrack);
@@ -503,6 +551,7 @@ async function toggleVideo() {
       els.btnCam.textContent = "Cam off";
       setStatus(`Камера включена (${summarizeStream(localStream)})`);
       enableControls();
+      await sendRenegotiationOffer();
     } catch (e) {
       setStatus(describeGetUserMediaError(e));
     }
