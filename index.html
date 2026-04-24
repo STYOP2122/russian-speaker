@@ -50,7 +50,25 @@
         </div>
 
         <div class="card">
-          <h2>2) Соединение (ручной обмен)</h2>
+          <h2>2) Соединение (авто)</h2>
+
+          <div class="row">
+            <button id="btnNewRoom">Создать комнату</button>
+            <button id="btnJoinRoom" class="ghost">Подключиться</button>
+          </div>
+
+          <label class="field">
+            <span>Код комнаты</span>
+            <input id="roomCode" class="input" placeholder="например: 7K2D9A" />
+            <p class="hint">
+              Один создаёт комнату и отправляет код. Второй вводит код и нажимает
+              “Подключиться”.
+            </p>
+          </label>
+
+          <hr class="sep" />
+
+          <h3 class="h3">Ручной режим (запасной)</h3>
 
           <div class="row">
             <button id="btnCreateOffer" disabled>Создать Offer</button>

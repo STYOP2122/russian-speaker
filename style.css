@@ -138,6 +138,32 @@ video {
   margin-bottom: 6px;
 }
 
+.input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  background: rgba(255, 255, 255, 0.9);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono",
+    monospace;
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.sep {
+  margin: 14px 0;
+  border: 0;
+  border-top: 1px solid rgba(15, 23, 42, 0.12);
+}
+
+.h3 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: #334155;
+}
+
 textarea {
   width: 100%;
   box-sizing: border-box;
