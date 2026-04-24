@@ -1,0 +1,12 @@
+{
+  "name": "webrtc-1to1-call",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Minimal 1:1 WebRTC call with manual signaling (GitHub Pages friendly)",
+  "scripts": {
+    "dev": "npx --yes serve ."
+  },
+  "dependencies": {}
+}
+

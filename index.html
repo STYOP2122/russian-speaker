@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebRTC звонок (1:1)</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <header class="header">
+        <h1>WebRTC звонок 1:1</h1>
+        <p class="sub">
+          Без сервера: обменяйтесь кодами Offer/Answer (подходит для GitHub Pages).
+        </p>
+      </header>
+
+      <section class="grid">
+        <div class="card">
+          <h2>1) Медиа</h2>
+          <div class="row">
+            <label class="check">
+              <input id="optVideo" type="checkbox" checked />
+              <span>Включать камеру</span>
+            </label>
+          </div>
+          <div class="row">
+            <button id="btnStart">Включить микрофон (и камеру)</button>
+            <button id="btnStop" class="ghost" disabled>Остановить</button>
+          </div>
+          <div class="row">
+            <button id="btnMute" class="ghost" disabled>Mute</button>
+            <button id="btnCam" class="ghost" disabled>Cam off</button>
+          </div>
+
+          <div class="videos">
+            <div class="videoBlock">
+              <div class="label">Вы</div>
+              <video id="localVideo" autoplay playsinline muted></video>
+            </div>
+            <div class="videoBlock">
+              <div class="label">Собеседник</div>
+              <video id="remoteVideo" autoplay playsinline></video>
+            </div>
+          </div>
+          <p class="hint">
+            Подсказка: если видео не нужно — снимите галочку “Включать камеру” перед
+            стартом (или выключите Cam off после).
+          </p>
+        </div>
+
+        <div class="card">
+          <h2>2) Соединение (ручной обмен)</h2>
+
+          <div class="row">
+            <button id="btnCreateOffer" disabled>Создать Offer</button>
+            <button id="btnCreateAnswer" class="ghost" disabled>Создать Answer</button>
+          </div>
+
+          <label class="field">
+            <span>Ваш код (отправьте собеседнику)</span>
+            <textarea id="outSdp" rows="9" readonly></textarea>
+            <div class="row">
+              <button id="btnCopyOut" class="ghost" disabled>Копировать</button>
+              <span id="status" class="status">Готово</span>
+            </div>
+          </label>
+
+          <label class="field">
+            <span>Код от собеседника (вставьте сюда)</span>
+            <textarea id="inSdp" rows="9" placeholder="Вставьте Offer или Answer…"></textarea>
+            <div class="row">
+              <button id="btnApplyIn" disabled>Применить</button>
+              <button id="btnClearIn" class="ghost" disabled>Очистить</button>
+            </div>
+          </label>
+
+          <details class="faq">
+            <summary>Как пользоваться</summary>
+            <ol>
+              <li>Оба нажимают “Включить камеру/микрофон” (или хотя бы микрофон).</li>
+              <li>
+                Один нажимает “Создать Offer”, копирует “Ваш код” и отправляет второму.
+              </li>
+              <li>
+                Второй вставляет код в “Код от собеседника”, жмёт “Применить”, затем
+                “Создать Answer”, копирует “Ваш код” и отправляет первому.
+              </li>
+              <li>
+                Первый вставляет Answer в “Код от собеседника” и жмёт “Применить”.
+              </li>
+            </ol>
+            <p class="hint">
+              Важно: коды могут быть длинными — это нормально. В некоторых сетях
+              прямое соединение может не установиться без TURN-сервера.
+            </p>
+          </details>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
+
