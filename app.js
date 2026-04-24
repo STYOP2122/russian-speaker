@@ -21,6 +21,21 @@ let side = null; // "ru" | "am"
 let ws = null;
 let clientId = null;
 
+window.addEventListener("error", (ev) => {
+  try {
+    setStatus(`Ошибка JS: ${ev?.message ?? ev}`);
+  } catch {
+    // ignore
+  }
+});
+window.addEventListener("unhandledrejection", (ev) => {
+  try {
+    setStatus(`Ошибка Promise: ${ev?.reason?.message ?? ev?.reason ?? ev}`);
+  } catch {
+    // ignore
+  }
+});
+
 function getSignalWsUrl() {
   // After deploying the Worker, open the site as:
   // https://.../?signal=wss://YOUR_WORKER_DOMAIN/ws
@@ -47,7 +62,6 @@ function setSide(next) {
     els.sideBadge.textContent = "🇷🇺 Россия (создаёт первый код)";
     els.btnSideRu?.classList.remove("ghost");
     els.btnSideAm?.classList.add("ghost");
-    void autoMakeOfferIfReady();
   } else if (side === "am") {
     els.sideBadge.textContent = "🇦🇲 Армения (отвечает на первый код)";
     els.btnSideAm?.classList.remove("ghost");
@@ -236,7 +250,6 @@ async function startMedia() {
 
   setStatus("Медиа включено");
   enableControls();
-  void autoMakeOfferIfReady();
 }
 
 function stopMedia() {
